@@ -1,0 +1,77 @@
+services:
+  # MySQL Database Service
+  mysql_db:
+    image: mysql:8.0
+    container_name: etl_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${SPC_DB_NAME:-allcdr_spc}
+    ports:
+      - 3307:3306
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Mount schema file for initialization (copy schema.sql to same folder)
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-rootpass}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ETL Service - Uses pre-built image from Docker Hub
+  etl_service:
+    image: samratmajumder/multycomm-cdr-etl-service:latest
+    container_name: etl_app
+    restart: unless-stopped
+    depends_on:
+      mysql_db:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DB_HOST: mysql_db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${DB_PASSWORD:-rootpass}
+      # ETL settings
+      ETL_CLIENT_NAME: ${ETL_CLIENT_NAME:-spc}
+      FETCH_INTERVAL_MINUTES: ${FETCH_INTERVAL_MINUTES:-5}
+      # Customer-specific settings (SPC)
+      SPC_BASE_URL: ${SPC_BASE_URL}
+      SPC_API_USERNAME: ${SPC_API_USERNAME}
+      SPC_API_PASSWORD: ${SPC_API_PASSWORD}
+      SPC_API_ACCOUNT_ID: ${SPC_API_ACCOUNT_ID}
+      SPC_API_TENANT: ${SPC_API_TENANT}
+      SPC_DB_NAME: ${SPC_DB_NAME:-allcdr_spc}
+      # Customer-specific settings (SHAMS)
+      SHAMS_BASE_URL: ${SHAMS_BASE_URL:-}
+      SHAMS_API_USERNAME: ${SHAMS_API_USERNAME:-}
+      SHAMS_API_PASSWORD: ${SHAMS_API_PASSWORD:-}
+      SHAMS_API_ACCOUNT_ID: ${SHAMS_API_ACCOUNT_ID:-}
+      SHAMS_API_TENANT: ${SHAMS_API_TENANT:-}
+      SHAMS_DB_NAME: ${SHAMS_DB_NAME:-}
+      # Customer-specific settings (MEYDAN)
+      MEYDAN_BASE_URL: ${MEYDAN_BASE_URL:-}
+      MEYDAN_API_USERNAME: ${MEYDAN_API_USERNAME:-}
+      MEYDAN_API_PASSWORD: ${MEYDAN_API_PASSWORD:-}
+      MEYDAN_API_ACCOUNT_ID: ${MEYDAN_API_ACCOUNT_ID:-}
+      MEYDAN_API_TENANT: ${MEYDAN_API_TENANT:-}
+      MEYDAN_DB_NAME: ${MEYDAN_DB_NAME:-}
+    volumes:
+      # Mount .env from current folder (read-only)
+      - ./.env:/app/.env:ro
+      # Mount logs folder for persistence
+      - ./logs:/app/logs
+      # Mount schema for runtime access
+      - ./schema.sql:/app/schema/phase3_complete_unified.sql:ro
+      # IMPORTANT: Mount local etl_service.py to override the old code in Docker image
+      - ./etl_service.py:/app/etl_service.py:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+volumes:
+  mysql_data:
+    driver: local
